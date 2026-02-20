@@ -107,7 +107,7 @@ function authorizeRoles(...allowedRoles) {
 // Registration Route
 app.post('/api/register', registerUser);
 
-// Login Route
+// Login Route with Brute Force Protection
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -128,14 +128,53 @@ app.post('/api/login', async (req, res) => {
             });
         }
 
+        // Only allow superadmin login
+        if (user.role !== 'superadmin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied. Only superadmin users can login to this portal.'
+            });
+        }
+
+        // Check if user is locked out
+        const lockoutDuration = 15 * 60 * 1000; // 15 minutes in milliseconds
+        const maxAttempts = 5;
+
+        if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+            const remainingTime = Math.ceil((user.lockoutUntil - new Date()) / 1000);
+            return res.status(429).json({
+                success: false,
+                message: 'Too many failed attempts. Please try again later.',
+                lockout: true,
+                remainingTime: remainingTime // in seconds
+            });
+        }
+
         // Verify password
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
+            // Increment failed attempts
+            user.failedLoginAttempts += 1;
+
+            // Lock user out if max attempts reached
+            if (user.failedLoginAttempts >= maxAttempts) {
+                user.lockoutUntil = new Date(Date.now() + lockoutDuration);
+            }
+
+            await user.save();
+
+            const remainingAttempts = Math.max(0, maxAttempts - user.failedLoginAttempts);
             return res.status(401).json({
                 success: false,
-                message: 'Invalid email or password'
+                message: 'Invalid email or password',
+                remainingAttempts: remainingAttempts
             });
         }
+
+        // Reset failed attempts on successful login
+        user.failedLoginAttempts = 0;
+        user.lockoutUntil = null;
+        await user.save();
 
         // Generate JWT token
         const token = jwt.sign(

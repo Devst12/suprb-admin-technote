@@ -26,6 +26,14 @@ const AuthUserSchema = new mongoose.Schema({
     createdAt: {
         type: Date,
         default: Date.now
+    },
+    failedLoginAttempts: {
+        type: Number,
+        default: 0
+    },
+    lockoutUntil: {
+        type: Date,
+        default: null
     }
 });
 
